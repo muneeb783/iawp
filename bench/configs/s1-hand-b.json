@@ -1,0 +1,66 @@
+[
+	{
+		"name": "critical",
+		"matches": [
+			[
+				{
+					"PcommPrefix": "schbench"
+				}
+			]
+		],
+		"kind": {
+			"Open": {
+				"preempt": true,
+				"slice_us": 800,
+				"weight": 1000
+			}
+		}
+	},
+	{
+		"name": "batch",
+		"matches": [
+			[
+				{
+					"PcommPrefix": "stress-ng"
+				}
+			],
+			[
+				{
+					"PcommPrefix": "make"
+				}
+			],
+			[
+				{
+					"PcommPrefix": "cc1"
+				}
+			],
+			[
+				{
+					"PcommPrefix": "gcc"
+				}
+			]
+		],
+		"kind": {
+			"Confined": {
+				"cpus_range": [
+					1,
+					4
+				],
+				"util_range": [
+					0.8,
+					0.9
+				],
+				"weight": 50
+			}
+		}
+	},
+	{
+		"name": "default",
+		"matches": [
+			[]
+		],
+		"kind": {
+			"Open": {}
+		}
+	}
+]

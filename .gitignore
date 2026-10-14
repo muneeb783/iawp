@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# iawp local state
+*.db
+
+# Lab outputs copied back from the VM (publish curated results deliberately, not raw dumps)
+lab-out/
+bench/phase0/results/
+
+# Third-party docs copied from sched-ext/scx for local reference (GPL-2.0; not ours to relicense)
+reference/
+
+.DS_Store
+
+# Personal planning doc
+Intent-Aware Workload Placement Build Plan.md
