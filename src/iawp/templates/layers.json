@@ -1,0 +1,6 @@
+{
+	"_comment": "Layer policies from the Phase 0 lab (bench/configs/s1-hand-g.json): priority, not partitioning. Only membership is generated.",
+	"critical": { "Open": { "preempt": true, "weight": 1000 } },
+	"batch": { "Open": { "weight": 50 } },
+	"default": { "Open": {} }
+}

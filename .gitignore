@@ -19,3 +19,7 @@ reference/
 
 # Personal planning doc
 Intent-Aware Workload Placement Build Plan.md
+
+# Python build output
+build/
+dist/
