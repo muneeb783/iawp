@@ -73,3 +73,13 @@ def test_strict_threshold_empties_critical(server_proc):
     ps = [Placed(r, decide(mock.classify(build_state(r)), strict)) for r in collect(server_proc)]
     layers = json.loads(render(build_config(plan_rules(ps)[0])))
     assert "critical" not in [l["name"] for l in layers]
+
+
+def test_longer_name_rule_folds_into_shorter(server_proc):
+    # Seen on the lab VM: stress-ng forks workers named stress-ng-cpu.
+    make_proc(server_proc, 900, "stress-ng", ["stress-ng", "--cpu", "8"], uid=1000, cgroup=SESSION)
+    make_proc(server_proc, 901, "stress-ng-cpu", ["stress-ng-cpu"], ppid=900, uid=1000, cgroup=SESSION,
+              exe="/usr/bin/stress-ng")
+    rules, _ = plan_rules(placed(server_proc))
+    stress = [r for r in rules if r.value.startswith("stress-ng")]
+    assert [(r.value, r.pids) for r in stress] == [("stress-ng", (900, 901))]

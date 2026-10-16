@@ -61,16 +61,24 @@ class MockClassifier:
         return Classification(cls, probs, ENOUGH, "mock-1")
 
     def _match(self, state: dict[str, str]) -> str | None:
-        exe_name = posixpath.basename(state.get("executable", ""))
-        names = {state.get("process_name", ""), exe_name}
-        is_generic = bool(names & GENERIC) or any(n.startswith("python") for n in names)
-        if is_generic:
+        # The process's own name comes first. A script run through an interpreter
+        # often has a telling name ("unattended-upgr") while its exe is just
+        # /usr/bin/python3, and exe is only readable as root: checking exe first
+        # made root scans worse than unprivileged ones.
+        names = [state.get("process_name", ""), posixpath.basename(state.get("executable", ""))]
+        for name in names:
+            if _generic(name):
+                continue
+            for cls, known in NAMES.items():
+                if name in known:
+                    return cls
+        if any(_generic(n) for n in names):
             args = state.get("command_line", "").lower()
             for cls, words in HINTS.items():
                 if any(w in args for w in words):
                     return cls
-            return None
-        for cls, known in NAMES.items():
-            if names & known:
-                return cls
         return None
+
+
+def _generic(name: str) -> bool:
+    return name in GENERIC or name.startswith("python")

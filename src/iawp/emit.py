@@ -82,8 +82,24 @@ def plan_rules(placed: list[Placed]) -> tuple[list[Rule], list[Unmatched]]:
             continue
         kind, value, pids = rule
         rules.setdefault((layer, kind, value), set()).update(pids)
+    _drop_covered_prefixes(rules)
     planned = [Rule(l, k, v, tuple(sorted(pids))) for (l, k, v), pids in sorted(rules.items())]
     return planned, unmatched
+
+
+def _drop_covered_prefixes(rules: dict[tuple[str, str, str], set[int]]) -> None:
+    """Fold "stress-ng-cpu" into "stress-ng": the shorter prefix already captures it.
+
+    Only within one layer. Across layers it cannot happen, because the shorter
+    rule would have failed the conflict check.
+    """
+    for key in sorted(rules, key=lambda k: -len(k[2])):
+        layer, kind, value = key
+        if kind != "PcommPrefix":
+            continue
+        shorter = [k for k in rules if k[:2] == key[:2] and k != key and value.startswith(k[2])]
+        if shorter:
+            rules[min(shorter, key=lambda k: len(k[2]))].update(rules.pop(key))
 
 
 def _cgroup_rule(p: Placed, procs: list[Placed]):
