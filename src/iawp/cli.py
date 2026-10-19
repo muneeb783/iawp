@@ -135,6 +135,34 @@ def cmd_config(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_eval(args: argparse.Namespace) -> int:
+    from iawp import evaluate
+
+    path = Path(args.file)
+    records = evaluate.load(path)
+    if args.judgment == "exclude":
+        records = [r for r in records if not r.get("judgment")]
+    elif args.judgment == "only":
+        records = [r for r in records if r.get("judgment")]
+    # Measure the model itself: a cache would hide both its latency and changes in its answers.
+    backend = get_backend(args.backend, args.url, args.model)
+    if args.backend == "hosted":
+        print(f"iawp: sending {len(records)} eval records to {HOSTED_URL}", file=sys.stderr)
+    thresholds = Thresholds(critical=args.critical_threshold, other=args.threshold)
+    progress = None
+    if sys.stderr.isatty() and args.backend != "mock":
+        progress = lambda i, n: print(f"\r  {i}/{n}", end="" if i < n else "\n", file=sys.stderr, flush=True)  # noqa: E731
+    scored = evaluate.run(backend, records, thresholds, progress)
+    judgment = {"include": "judgment calls included", "exclude": "clear labels only", "only": "judgment calls only"}
+    print(evaluate.report(scored, args.backend, path, judgment[args.judgment]))
+    if args.errors:
+        print("\nwrong decisions:\n" + (evaluate.errors(scored) or "  none"))
+    if args.json:
+        evaluate.dump(scored, Path(args.json), args.backend)
+        print(f"\nwrote per-record results to {args.json}", file=sys.stderr)
+    return 0
+
+
 def cmd_cache(args: argparse.Namespace) -> int:
     from iawp.classify.cache import Cache
 
@@ -200,6 +228,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-o", "--output", metavar="FILE", help="also write the config to FILE")
     p.set_defaults(func=cmd_config)
 
+    p = sub.add_parser("eval", parents=[common], help="score a backend on a labelled process set")
+    p.add_argument("file", nargs="?", default="eval/processes.jsonl", help="labelled records (default: %(default)s)")
+    p.add_argument("--judgment", choices=["include", "exclude", "only"], default="include",
+                   help="records whose label is a judgment call (default: include)")
+    p.add_argument("--errors", action="store_true", help="list every wrong decision")
+    p.add_argument("--json", metavar="FILE", help="save per-record results and metrics")
+    p.set_defaults(func=cmd_eval)
+
     p = sub.add_parser("cache", parents=[common], help="show or clear remembered model answers")
     p.add_argument("action", choices=["stats", "clear"], nargs="?", default="stats")
     p.set_defaults(func=cmd_cache)
@@ -208,7 +244,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.command != "cache" and not Path(args.proc_root).is_dir():
+    if args.command in ("scan", "explain", "config") and not Path(args.proc_root).is_dir():
         print(f"iawp: {args.proc_root} not found; iawp reads Linux's /proc and must run on Linux", file=sys.stderr)
         return 1
     try:

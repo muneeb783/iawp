@@ -68,8 +68,10 @@ def redact_arg(arg: str) -> str:
 
 def _redact_if_opaque(m: re.Match[str]) -> str:
     s = m.group(0)
-    # Plain words and paths-with-dashes ("dist-packages-for-python") are hints worth
-    # keeping; strings mixing letters and digits look like keys, hashes or tokens.
-    has_digit = any(c.isdigit() for c in s)
-    has_alpha = any(c.isalpha() for c in s)
-    return REDACTED if has_digit and has_alpha else s
+    # Keys, hashes and tokens are one long run mixing letters and digits. Short
+    # words joined by separators ("stable-x86_64-unknown-linux-gnu",
+    # "--housekeeping_interval=10s") are hints worth keeping.
+    for piece in re.split(r"[-_=+]", s):
+        if len(piece) >= 16 and any(c.isdigit() for c in piece) and any(c.isalpha() for c in piece):
+            return REDACTED
+    return s

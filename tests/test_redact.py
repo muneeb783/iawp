@@ -13,6 +13,8 @@ from iawp.redact import MAX_ARG_LEN, MAX_ARGS, REDACTED, redact_args
     (["curl", "https://x.io/a?token=abc&page=2"], ["curl", f"https://x.io/a?token={REDACTED}&page=2"]),
     (["curl", "-H", "Authorization: Bearer abc.def"], ["curl", "-H", f"Authorization: Bearer {REDACTED}"]),
     (["app", "--key", "AKIAIOSFODNN7EXAMPLE1234"], ["app", "--key", REDACTED]),
+    (["app", "--id", "ghp_x7K2mQ9vR4tW8yZ1aB3cD5eF6gH0jL"], ["app", "--id", REDACTED]),  # prefixed token
+    (["git", "checkout", "3f9c2a7be1d04c6a9f2b8e5d7c1a0b4e6f8d2c9a"], ["git", "checkout", REDACTED]),
 ])
 def test_redacts_secrets(argv, expected):
     assert redact_args(argv) == expected
@@ -23,6 +25,8 @@ def test_redacts_secrets(argv, expected):
     ["python3", "serve.py", "--port", "8080"],
     ["/usr/lib/python3/dist-packages/supervisor/supervisord.py"],
     ["nginx: worker process"],
+    ["/home/dev/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc"],
+    ["cadvisor", "--housekeeping_interval=10s", "--max_housekeeping_interval=15s"],
 ])
 def test_keeps_ordinary_args(argv):
     assert redact_args(argv) == argv
