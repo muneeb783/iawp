@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from iawp import __version__
-from iawp.classify import BACKENDS, Classification, build_state, get_backend
+from iawp.classify import BACKENDS, Classification, ClassifierError, build_state, get_backend
 from iawp.collector import ProcessRecord, collect
 from iawp.emit import Placed, Rule, Unmatched, build_config, diff, plan_rules, render
 from iawp.policy import Decision, Thresholds, decide
@@ -25,15 +25,21 @@ class Row:
 
 
 def classify_all(args: argparse.Namespace) -> list[Row]:
-    backend = get_backend(args.backend)
+    backend = get_backend(args.backend, args.url, args.model)
+    if args.backend == "hosted":
+        print(f"iawp: sending redacted details of every process to {backend.endpoint}", file=sys.stderr)
     thresholds = Thresholds(critical=args.critical_threshold, other=args.threshold)
+    answers: dict[tuple, Classification] = {}  # identical workers (stress-ng-cpu x8) cost one request
     rows = []
     for r in collect(Path(args.proc_root)):
         if r.kernel_thread:
             rows.append(Row(r, None, None, Decision(UNKNOWN, "default", "kernel thread")))
             continue
         state = build_state(r)
-        result = backend.classify(state)
+        key = tuple(state.items())
+        if key not in answers:
+            answers[key] = backend.classify(state)
+        result = answers[key]
         rows.append(Row(r, state, result, decide(result, thresholds)))
     return rows
 
@@ -135,6 +141,8 @@ def _print_table(header: tuple[str, ...], rows: list[tuple[str, ...]]) -> None:
 def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--backend", choices=BACKENDS, default="mock", help="classifier backend (default: mock)")
+    common.add_argument("--url", help="SystemOne server for the local/hosted backends")
+    common.add_argument("--model", help="model to request; pin an exact version for reproducible results")
     common.add_argument("--threshold", type=float, default=Thresholds.other,
                         help="min probability for batch/other layers (default: %(default)s)")
     common.add_argument("--critical-threshold", type=float, default=Thresholds.critical,
@@ -166,4 +174,10 @@ def main(argv: list[str] | None = None) -> int:
     if not Path(args.proc_root).is_dir():
         print(f"iawp: {args.proc_root} not found; iawp reads Linux's /proc and must run on Linux", file=sys.stderr)
         return 1
-    return args.func(args)
+    try:
+        return args.func(args)
+    except ClassifierError as e:
+        print(f"iawp: {e}", file=sys.stderr)
+        if args.backend == "local":
+            print("iawp: start a local model server (see docs), or use --backend mock", file=sys.stderr)
+        return 1
