@@ -5,10 +5,12 @@ from __future__ import annotations
 import argparse
 import shutil
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from iawp import __version__
+from iawp.classify.systemone import HOSTED_URL
 from iawp.classify import BACKENDS, Classification, ClassifierError, build_state, get_backend
 from iawp.collector import ProcessRecord, collect
 from iawp.emit import Placed, Rule, Unmatched, build_config, diff, plan_rules, render
@@ -25,9 +27,10 @@ class Row:
 
 
 def classify_all(args: argparse.Namespace) -> list[Row]:
-    backend = get_backend(args.backend, args.url, args.model)
+    backend = get_backend(args.backend, args.url, args.model, None if args.no_cache else _cache_path(args))
+    args.classifier = backend  # scan reports cache hits
     if args.backend == "hosted":
-        print(f"iawp: sending redacted details of every process to {backend.endpoint}", file=sys.stderr)
+        print(f"iawp: sending redacted details of uncached processes to {HOSTED_URL}", file=sys.stderr)
     thresholds = Thresholds(critical=args.critical_threshold, other=args.threshold)
     answers: dict[tuple, Classification] = {}  # identical workers (stress-ng-cpu x8) cost one request
     rows = []
@@ -68,6 +71,9 @@ def cmd_scan(args: argparse.Namespace) -> int:
     counts = {layer: sum(1 for row in shown if row.decision.layer == layer) for layer in LAYER_ORDER}
     print(f"\n{len(shown)} processes: " + ", ".join(f"{n} {layer}" for layer, n in counts.items())
           + f"  (backend: {args.backend})")
+    if hasattr(args.classifier, "hits"):
+        c = args.classifier
+        print(f"cache: {c.hits} hits, {c.misses} asked the model  ({c.cache.path})")
     if unmatched:
         print(f"{len(unmatched)} classified but left in default (no safe match rule); see `iawp explain <pid>`")
     return 0
@@ -90,7 +96,8 @@ def cmd_explain(args: argparse.Namespace) -> int:
         print(f"  {k:<15} {v}")
 
     res = row.result
-    print(f"\nAnswer from {res.model}:")
+    when = f", cached {time.strftime('%Y-%m-%d %H:%M', time.localtime(res.cached_at))}" if res.cached_at else ""
+    print(f"\nAnswer from {res.model}{when}:")
     print(f"  enough information to tell: {res.enough_info:.2f}")
     for cls, p in sorted(res.probabilities.items(), key=lambda kv: -kv[1]):
         print(f"  {cls:<17} {p:.2f}  {'#' * round(p * 30)}")
@@ -128,6 +135,30 @@ def cmd_config(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_cache(args: argparse.Namespace) -> int:
+    from iawp.classify.cache import Cache
+
+    path = _cache_path(args)
+    if not path.exists():
+        print(f"no cache at {path}")
+        return 0
+    cache = Cache(path)
+    if args.action == "clear":
+        print(f"removed {cache.clear()} answers from {path}")
+        return 0
+    rows = cache.stats()
+    print(f"{path}: {sum(n for *_, n in rows)} answers")
+    for classifier, model, n in rows:
+        print(f"  {n:>5}  {model:<20} via {classifier}")
+    return 0
+
+
+def _cache_path(args: argparse.Namespace) -> Path:
+    from iawp.classify.cache import default_path
+
+    return Path(args.cache) if args.cache else default_path()
+
+
 def _print_table(header: tuple[str, ...], rows: list[tuple[str, ...]]) -> None:
     widths = [max([len(h)] + [len(r[i]) for r in rows]) for i, h in enumerate(header)]
     widths[3] = min(widths[3], 16)
@@ -143,6 +174,8 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--backend", choices=BACKENDS, default="mock", help="classifier backend (default: mock)")
     common.add_argument("--url", help="SystemOne server for the local/hosted backends")
     common.add_argument("--model", help="model to request; pin an exact version for reproducible results")
+    common.add_argument("--cache", metavar="FILE", help="answer cache (default: /var/cache/iawp as root, else ~/.cache/iawp)")
+    common.add_argument("--no-cache", action="store_true", help="always ask the model")
     common.add_argument("--threshold", type=float, default=Thresholds.other,
                         help="min probability for batch/other layers (default: %(default)s)")
     common.add_argument("--critical-threshold", type=float, default=Thresholds.critical,
@@ -166,12 +199,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--against", metavar="FILE", help="show a diff against an existing config")
     p.add_argument("-o", "--output", metavar="FILE", help="also write the config to FILE")
     p.set_defaults(func=cmd_config)
+
+    p = sub.add_parser("cache", parents=[common], help="show or clear remembered model answers")
+    p.add_argument("action", choices=["stats", "clear"], nargs="?", default="stats")
+    p.set_defaults(func=cmd_cache)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if not Path(args.proc_root).is_dir():
+    if args.command != "cache" and not Path(args.proc_root).is_dir():
         print(f"iawp: {args.proc_root} not found; iawp reads Linux's /proc and must run on Linux", file=sys.stderr)
         return 1
     try:

@@ -51,6 +51,8 @@ class SystemOneClassifier:
         self.model = model
         self.api_key = api_key
         self.timeout = timeout
+        # What the cache keys on: a different server or model is a different classifier.
+        self.identity = f"{name} {self.endpoint} model={model or 'server-default'}"
 
     def classify(self, state: dict[str, str]) -> Classification:
         body = {"state": format_state(state), "questions": QUESTIONS}

@@ -6,6 +6,13 @@ import pytest
 SESSION = "user.slice/user-1000.slice/session-3.scope"
 
 
+@pytest.fixture(autouse=True)
+def private_cache(tmp_path, monkeypatch):
+    """Keep every test's answer cache out of the real ~/.cache."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg-cache"))
+    return tmp_path / "xdg-cache" / "iawp" / "classify.db"
+
+
 def make_proc(root: Path, pid: int, comm: str, cmdline=(), ppid=1, uid=0, cgroup="", exe=None):
     """Write the /proc/<pid> files the collector reads."""
     d = root / str(pid)

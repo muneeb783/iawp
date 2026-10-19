@@ -15,6 +15,7 @@ class Classification:
     probabilities: dict[str, float]  # over every taxonomy class, sums to ~1
     enough_info: float  # P(yes) for "is there enough information here to tell?"
     model: str  # backend and model version, stored with cached answers
+    cached_at: float | None = None  # unix time the answer was first given, if it came from the cache
 
     @property
     def confidence(self) -> float:
