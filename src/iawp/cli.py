@@ -11,7 +11,7 @@ from pathlib import Path
 
 from iawp import __version__
 from iawp.classify.systemone import HOSTED_URL
-from iawp.classify import BACKENDS, Classification, ClassifierError, build_state, get_backend
+from iawp.classify import BACKENDS, Classification, ClassifierError, ServerUnreachable, build_state, get_backend
 from iawp.collector import ProcessRecord, collect
 from iawp.emit import Placed, Rule, Unmatched, build_config, diff, plan_rules, render
 from iawp.policy import Decision, Thresholds, decide
@@ -251,6 +251,6 @@ def main(argv: list[str] | None = None) -> int:
         return args.func(args)
     except ClassifierError as e:
         print(f"iawp: {e}", file=sys.stderr)
-        if args.backend == "local":
+        if isinstance(e, ServerUnreachable) and args.backend == "local":
             print("iawp: start a local model server (see docs), or use --backend mock", file=sys.stderr)
         return 1

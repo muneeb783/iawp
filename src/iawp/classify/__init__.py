@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from iawp.classify.base import Classification, Classifier, build_state
-from iawp.classify.systemone import ClassifierError
+from iawp.classify.systemone import ClassifierError, ServerUnreachable
 
 BACKENDS = ("mock", "local", "hosted")
 
@@ -29,4 +29,4 @@ def get_backend(name: str, url: str | None = None, model: str | None = None,
     raise ValueError(f"unknown backend {name!r}; choose from {', '.join(BACKENDS)}")
 
 
-__all__ = ["BACKENDS", "Classification", "Classifier", "ClassifierError", "build_state", "get_backend"]
+__all__ = ["BACKENDS", "Classification", "Classifier", "ClassifierError", "ServerUnreachable", "build_state", "get_backend"]

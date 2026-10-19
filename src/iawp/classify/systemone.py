@@ -20,7 +20,9 @@ from iawp.taxonomy import CLASSES
 
 LOCAL_URL = "http://127.0.0.1:8000"
 HOSTED_URL = "https://api.typesafe.ai"
-HOSTED_MODEL = "jev-latest"  # pin an exact version (--model) for reproducible results
+# The protocol requires a model in every request; servers that host one model
+# accept this alias. Pin an exact version (--model) for reproducible results.
+DEFAULT_MODEL = "jev-latest"
 API_KEY_ENV = "IAWP_API_KEY"  # never a flag: flags are readable by every user in /proc/<pid>/cmdline
 
 WORKLOAD = "workload"
@@ -43,21 +45,23 @@ class ClassifierError(RuntimeError):
     """The model could not be reached or gave an unusable answer."""
 
 
+class ServerUnreachable(ClassifierError):
+    """Nothing answered at the server address."""
+
+
 class SystemOneClassifier:
     def __init__(self, name: str, url: str, model: str | None = None, api_key: str | None = None,
                  timeout: float = 30.0):
         self.name = name
         self.endpoint = url.rstrip("/") + "/v1/systemone"
-        self.model = model
+        self.model = model or DEFAULT_MODEL
         self.api_key = api_key
         self.timeout = timeout
         # What the cache keys on: a different server or model is a different classifier.
-        self.identity = f"{name} {self.endpoint} model={model or 'server-default'}"
+        self.identity = f"{name} {self.endpoint} model={self.model}"
 
     def classify(self, state: dict[str, str]) -> Classification:
-        body = {"state": format_state(state), "questions": QUESTIONS}
-        if self.model:
-            body["model"] = self.model
+        body = {"model": self.model, "state": format_state(state), "questions": QUESTIONS}
         return parse_response(self._post(body))
 
     def _post(self, body: dict) -> dict:
@@ -73,7 +77,7 @@ class SystemOneClassifier:
             raise ClassifierError(f"{self.endpoint} answered HTTP {e.code}: {detail or e.reason}") from None
         except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
             reason = getattr(e, "reason", e)
-            raise ClassifierError(f"cannot reach a SystemOne server at {self.endpoint} ({reason})") from None
+            raise ServerUnreachable(f"cannot reach a SystemOne server at {self.endpoint} ({reason})") from None
         except json.JSONDecodeError:
             raise ClassifierError(f"{self.endpoint} did not answer with JSON") from None
 
@@ -110,4 +114,4 @@ def hosted(url: str | None = None, model: str | None = None) -> SystemOneClassif
     key = os.environ.get(API_KEY_ENV)
     if not key:
         raise ClassifierError(f"the hosted backend needs an API key in the {API_KEY_ENV} environment variable")
-    return SystemOneClassifier("hosted", url or HOSTED_URL, model or HOSTED_MODEL, key)
+    return SystemOneClassifier("hosted", url or HOSTED_URL, model, key)

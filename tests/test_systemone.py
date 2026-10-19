@@ -48,6 +48,12 @@ def server():
 STATE = {"process_name": "nginx", "executable": "/usr/sbin/nginx", "command_line": "nginx: worker process"}
 
 
+def test_model_is_always_sent(server):
+    # JevOS rejects requests without one (HTTP 422), as the hosted API does.
+    local(server.url).classify(STATE)
+    assert server.seen[0][2]["model"] == "jev-latest"
+
+
 def test_request_shape(server):
     local(server.url, model="m-1").classify(STATE)
     path, headers, body = server.seen[0]
@@ -119,3 +125,11 @@ def test_cli_reports_unreachable_server(server_proc, capsys):
     code = main(["scan", "--backend", "local", "--url", "http://127.0.0.1:9", "--proc-root", str(server_proc)])
     err = capsys.readouterr().err
     assert code == 1 and "cannot reach" in err and "--backend mock" in err
+
+
+def test_cli_server_error_has_no_start_hint(server, server_proc, capsys):
+    # The server is running; telling the user to start one would mislead.
+    server.reply = lambda body: (422, {"detail": "Field required"})
+    code = main(["scan", "--backend", "local", "--url", server.url, "--proc-root", str(server_proc)])
+    err = capsys.readouterr().err
+    assert code == 1 and "HTTP 422" in err and "start a local" not in err
