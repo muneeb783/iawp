@@ -17,8 +17,9 @@ from iawp.taxonomy import LAYER_OF, UNKNOWN
 @dataclass(frozen=True)
 class Thresholds:
     enough_info: float = 0.5  # min P("there is enough information to tell")
-    critical: float = 0.9  # min class probability to place into the critical layer
-    other: float = 0.7  # min class probability for every other non-default layer
+    # Chosen on the eval set's dev half (odd ids) with JevOS v5, checked on the even half.
+    critical: float = 0.95  # min class probability to place into the critical layer
+    other: float = 0.8  # min class probability for every other non-default layer
 
 
 @dataclass(frozen=True)

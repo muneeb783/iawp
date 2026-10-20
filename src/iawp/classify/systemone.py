@@ -1,7 +1,10 @@
 """Client for SystemOne-protocol decision models (Jev, JevOS, Laya, Clef...).
 
-One request per process: the redacted state plus two questions, a `choice`
-over the taxonomy classes and a `noul` ("is there enough information?").
+One request per process: the redacted state plus a `choice` question over
+the taxonomy classes. A `noul` "is there enough information?" question was
+dropped after evaluation: JevOS v5 scored known and unknowable processes
+almost alike (0.37 vs 0.32), so it gated nothing, while class confidence is
+well calibrated. Answers to it are still read if a server returns one.
 The same code serves a model on this machine (`local`) or a hosted API
 (`hosted`); only the base URL and the API key differ.
 
@@ -33,10 +36,6 @@ QUESTIONS = {
         "type": "choice",
         "instructions": "What kind of workload is this Linux process? Judge by what the program is for, not by how busy it is right now.",
         "criteria": dict(CLASSES),  # fixed order: reordering options shifts the probabilities
-    },
-    ENOUGH_INFO: {
-        "type": "noul",
-        "instructions": "Do these process details say enough to tell what kind of workload this is, without guessing?",
     },
 }
 
@@ -92,7 +91,7 @@ def parse_response(resp: dict) -> Classification:
     try:
         choice = answers[WORKLOAD]
         raw = choice["probabilities"]
-        enough = float(answers[ENOUGH_INFO]["noul"])
+        enough = float(answers[ENOUGH_INFO]["noul"]) if ENOUGH_INFO in answers else 1.0
     except (KeyError, TypeError, ValueError):
         raise ClassifierError(f"unexpected answer shape: {json.dumps(resp)[:300]}") from None
 

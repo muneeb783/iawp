@@ -45,7 +45,7 @@ HINTS: dict[str, tuple[str, ...]] = {
     "io-data": ("backup", "etl", "ingest", "export", "sync"),
 }
 
-HIT, ENOUGH, NOT_ENOUGH = 0.92, 0.95, 0.2
+HIT, ENOUGH, NOT_ENOUGH = 0.97, 0.95, 0.2
 
 
 class MockClassifier:

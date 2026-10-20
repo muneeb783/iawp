@@ -64,7 +64,13 @@ def test_request_shape(server):
     q = body["questions"]
     assert q["workload"]["type"] == "choice"
     assert list(q["workload"]["criteria"]) == list(CLASSES)  # same options, same order, every time
-    assert q["enough_info"]["type"] == "noul"
+    assert list(q) == ["workload"]
+
+
+def test_enough_info_is_optional():
+    resp = answer({"batch-compute": 1.0})
+    del resp["answers"]["enough_info"]
+    assert parse_response(resp).enough_info == 1.0
 
 
 def test_parses_and_normalises():
