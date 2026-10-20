@@ -108,6 +108,8 @@ def cmd_explain(args: argparse.Namespace) -> int:
     rules, unmatched = plan(rows)
     if rule := next((x for x in rules if r.pid in x.pids), None):
         print(f"Config rule: {{\"{rule.kind}\": \"{rule.value}\"}} in layer {rule.layer} (captures {len(rule.pids)} processes)")
+        if rule.note:
+            print(f"  {rule.note}")
     elif miss := next((u for u in unmatched if u.placed.record.pid == r.pid), None):
         print(f"No config rule, stays in default: {miss.reason}")
     return 0

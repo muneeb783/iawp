@@ -5,12 +5,15 @@ exactly the processes we mean. scx_layered matches on kernel-visible facts
 (comm prefix, cgroup path, uid, ...), not on command lines, so `python
 serve.py` and `python train.py` look identical to it by name. Rules:
 
-1. Prefer the process's cgroup when it is dedicated to one service or
-   container (system.slice/nginx.service, docker-<id>.scope, kubepods...).
-2. Otherwise use its name (PcommPrefix), unless the name is a generic
-   interpreter or wrapper that many unrelated workloads share.
-3. Only emit a rule if every currently running process it would capture was
-   placed in the same layer. Otherwise leave it out and report why.
+1. A cgroup dedicated to one service or container (system.slice/nginx.service,
+   docker-<id>.scope, kubepods...) is placed as a whole: one CgroupPrefix
+   rule, layer chosen by the service's main process. scx_layered cannot split
+   a service anyway (postgres autovacuum shares the database's name and
+   cgroup), and splitting it is not what an operator would write by hand.
+2. Other processes are matched by name (PcommPrefix), unless the name is a
+   generic interpreter or wrapper that many unrelated workloads share.
+3. Only emit a name rule if every currently running process it would capture
+   ends up in the same layer. Otherwise leave it out and report why.
 
 Anything without a safe rule stays in the default layer, which is always last.
 Output is sorted so that diffs between runs show only real changes.
@@ -26,7 +29,7 @@ from importlib import resources
 
 from iawp.collector import ProcessRecord
 from iawp.policy import Decision
-from iawp.taxonomy import LAYER_ORDER
+from iawp.taxonomy import LAYER_ORDER, UNKNOWN
 
 DEFAULT_LAYER = "default"
 
@@ -57,6 +60,7 @@ class Rule:
     kind: str  # scx_layered match type, e.g. "PcommPrefix"
     value: str
     pids: tuple[int, ...]  # processes this rule captures right now
+    note: str = ""  # why, when it is not simply "classified so" (service placement)
 
 
 @dataclass(frozen=True)
@@ -68,23 +72,78 @@ class Unmatched:
 def plan_rules(placed: list[Placed]) -> tuple[list[Rule], list[Unmatched]]:
     """Pick one safe match rule per non-default process."""
     procs = [p for p in placed if not p.record.kernel_thread]
-    rules: dict[tuple[str, str, str], set[int]] = {}
-    unmatched = []
+    services: dict[str, list[Placed]] = {}
     for p in procs:
-        layer = p.decision.layer
-        if layer == DEFAULT_LAYER:
+        if _dedicated(p.record.cgroup):
+            services.setdefault(p.record.cgroup, []).append(p)
+
+    # The layer each process will actually land in, which name rules are checked against.
+    effective = {p.record.pid: p.decision.layer for p in procs}
+    service_rules: list[Rule] = []
+    unmatched: list[Unmatched] = []
+    for path, members in sorted(services.items()):
+        layer, note, misses = _service_layer(path, members)
+        for q in members:
+            effective[q.record.pid] = layer
+        unmatched += misses
+        if layer != DEFAULT_LAYER:
+            service_rules.append(Rule(layer, "CgroupPrefix", path + "/",
+                                      tuple(sorted(q.record.pid for q in members)), note))
+
+    rules: dict[tuple[str, str, str], set[int]] = {}
+    for p in procs:
+        if p.record.cgroup in services or p.decision.layer == DEFAULT_LAYER:
             continue
-        rule, reason = _cgroup_rule(p, procs)
-        if rule is None:
-            rule, reason = _comm_rule(p, procs)
+        rule, reason = _comm_rule(p, procs, effective)
         if rule is None:
             unmatched.append(Unmatched(p, reason))
             continue
         kind, value, pids = rule
-        rules.setdefault((layer, kind, value), set()).update(pids)
+        rules.setdefault((p.decision.layer, kind, value), set()).update(pids)
     _drop_covered_prefixes(rules)
-    planned = [Rule(l, k, v, tuple(sorted(pids))) for (l, k, v), pids in sorted(rules.items())]
-    return planned, unmatched
+    planned = service_rules + [Rule(l, k, v, tuple(sorted(pids))) for (l, k, v), pids in rules.items()]
+    return sorted(planned, key=lambda r: (r.layer, r.kind, r.value)), unmatched
+
+
+def _dedicated(cgroup: str) -> bool:
+    return any(rx.match(cgroup) for rx in _DEDICATED_CGROUP)
+
+
+def _service_layer(path: str, members: list[Placed]) -> tuple[str, str, list[Unmatched]]:
+    """One layer for a whole service, decided by its main process.
+
+    Main process: the member whose parent is outside the cgroup (systemd's
+    MainPID); the lowest pid if there are several. If the main process lands
+    in default (unknown, or a wrapper like `sh -c`), the other members decide
+    when they all agree, but never for `critical`: only a main process can
+    promote a service, so a misclassified helper cannot.
+    """
+    pids = {q.record.pid for q in members}
+    roots = sorted((q for q in members if q.record.ppid not in pids), key=lambda q: q.record.pid)
+    main = roots[0] if roots else min(members, key=lambda q: q.record.pid)
+    main_is = f"main process {main.record.comm} (pid {main.record.pid}) is {main.decision.cls}"
+    if main.decision.layer != DEFAULT_LAYER:
+        layer, why = main.decision.layer, main_is
+    else:
+        decided = {q.decision.layer for q in members if q is not main and q.decision.cls != UNKNOWN}
+        if len(decided) == 1 and not decided & {DEFAULT_LAYER, "critical"}:
+            layer = next(iter(decided))
+            why = f"{main_is}; every other decided member is {layer}"
+        else:
+            layer = DEFAULT_LAYER
+            if decided == {"critical"}:
+                why = f"{main_is}; only a main process can make a service critical"
+            elif len(decided) > 1:
+                why = f"{main_is} and members disagree ({', '.join(sorted(decided))})"
+            else:
+                why = main_is
+    followers = [q for q in members if q.decision.layer != layer and q.decision.cls != UNKNOWN]
+    note = f"service {path}: {why}"
+    if followers:
+        note += "; follow it: " + ", ".join(f"{q.record.pid} {q.record.comm} ({q.decision.cls})" for q in followers)
+    misses = [Unmatched(q, f"stays with its service in default: {why}")
+              for q in members if layer == DEFAULT_LAYER and q.decision.layer != DEFAULT_LAYER]
+    return layer, note, misses
 
 
 def _drop_covered_prefixes(rules: dict[tuple[str, str, str], set[int]]) -> None:
@@ -102,33 +161,20 @@ def _drop_covered_prefixes(rules: dict[tuple[str, str, str], set[int]]) -> None:
             rules[min(shorter, key=lambda k: len(k[2]))].update(rules.pop(key))
 
 
-def _cgroup_rule(p: Placed, procs: list[Placed]):
-    path = p.record.cgroup
-    if not any(rx.match(path) for rx in _DEDICATED_CGROUP):
-        return None, f"cgroup {path or '(none)'} is not dedicated to one service"
-    members = [q for q in procs if q.record.cgroup == path or q.record.cgroup.startswith(path + "/")]
-    if conflict := _conflict(p, members):
-        return None, f"cgroup {path} also holds {conflict}"
-    return ("CgroupPrefix", path + "/", [q.record.pid for q in members]), ""
-
-
-def _comm_rule(p: Placed, procs: list[Placed]):
+def _comm_rule(p: Placed, procs: list[Placed], effective: dict[int, str]):
     comm = p.record.comm
     if not comm or comm in AMBIGUOUS_COMMS or comm.startswith("python"):
         return None, f"name {comm!r} is shared by unrelated workloads"
     # PcommPrefix is a prefix match: "nginx" would also capture "nginx-exporter".
+    # A process matching rules in two layers goes to the first layer, so every
+    # captured process must already be headed for this rule's layer.
     members = [q for q in procs if q.record.comm.startswith(comm)]
-    if conflict := _conflict(p, members):
-        return None, f"name {comm!r} also matches {conflict}"
-    return ("PcommPrefix", comm, [q.record.pid for q in members]), ""
-
-
-def _conflict(p: Placed, members: list[Placed]) -> str:
-    """Describe a process the rule would capture that belongs in another layer."""
     for q in members:
-        if q.decision.layer != p.decision.layer:
-            return f"pid {q.record.pid} ({q.record.comm}, {q.decision.cls} -> {q.decision.layer})"
-    return ""
+        if effective[q.record.pid] != p.decision.layer:
+            where = "its service's layer" if effective[q.record.pid] != q.decision.layer else q.decision.cls
+            return None, (f"name {comm!r} also matches pid {q.record.pid} "
+                          f"({q.record.comm}, {where} -> {effective[q.record.pid]})")
+    return ("PcommPrefix", comm, [q.record.pid for q in members]), ""
 
 
 def load_template() -> dict[str, dict]:
