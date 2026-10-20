@@ -21,7 +21,7 @@ import urllib.request
 from iawp.classify.base import Classification
 from iawp.taxonomy import CLASSES
 
-LOCAL_URL = "http://127.0.0.1:8000"
+LOCAL_URL = "http://127.0.0.1:8017"  # JevOS default port
 HOSTED_URL = "https://api.typesafe.ai"
 # The protocol requires a model in every request; servers that host one model
 # accept this alias. Pin an exact version (--model) for reproducible results.

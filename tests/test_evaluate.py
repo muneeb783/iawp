@@ -82,10 +82,10 @@ def test_eval_set_leaks_no_secrets():
 
 def test_cli_eval_mock(capsys, tmp_path):
     out_json = tmp_path / "r.json"
-    assert main(["eval", str(EVAL), "--errors", "--json", str(out_json)]) == 0
+    assert main(["eval", str(EVAL), "--backend", "mock", "--errors", "--json", str(out_json)]) == 0
     out = capsys.readouterr().out
     assert "critical precision" in out and "wrong decisions:" in out
     data = json.loads(out_json.read_text())
     assert len(data["results"]) == len(evaluate.load(EVAL))
-    assert main(["eval", str(EVAL), "--judgment", "only"]) == 0
+    assert main(["eval", str(EVAL), "--backend", "mock", "--judgment", "only"]) == 0
     assert "judgment calls only" in capsys.readouterr().out

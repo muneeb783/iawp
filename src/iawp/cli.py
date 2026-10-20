@@ -1,4 +1,4 @@
-"""iawp command line: scan, explain, config."""
+"""iawp command line: scan, explain, config, eval, cache, apply, rollback, stop, status."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from iawp import __version__
+from iawp import apply as applier
 from iawp.classify.systemone import HOSTED_URL
 from iawp.classify import BACKENDS, Classification, ClassifierError, ServerUnreachable, build_state, get_backend
 from iawp.collector import ProcessRecord, collect
@@ -181,6 +182,77 @@ def cmd_cache(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_apply(args: argparse.Namespace) -> int:
+    host = _host(args)
+    applier.preflight(host)  # refuse before asking the model or the operator anything
+    rows = classify_all(args)
+    rules, unmatched = plan(rows)
+    rules = gate_critical(args, host, rows, rules)
+    print(applier.apply(host, render(build_config(rules))))
+    if unmatched:
+        print(f"{len(unmatched)} classified processes have no safe match rule and stay in default "
+              "(see `iawp config --dry-run`)", file=sys.stderr)
+    return 0
+
+
+def gate_critical(args: argparse.Namespace, host: applier.Host, rows: list[Row], rules: list[Rule]) -> list[Rule]:
+    """Keep a critical rule only if an operator approved it (now or before).
+
+    A wrong critical placement hurts the service being protected, and the
+    model is not reliable enough to make one alone. Batch and background
+    rules pass through untouched.
+    """
+    approvals = applier.Approvals.load(host)
+    by_pid = {row.record.pid: row for row in rows}
+    kept, approved_now = [], False
+    for rule in rules:
+        if rule.layer != "critical":
+            kept.append(rule)
+            continue
+        hashes = applier.exe_hashes(host, rule.pids)
+        label = f'{{"{rule.kind}": "{rule.value}"}}'
+        if approvals.covers(rule, hashes):
+            kept.append(rule)
+        elif args.trust_critical:
+            print(f"iawp: --trust-critical: placing {label} in critical without approval", file=sys.stderr)
+            kept.append(rule)
+        elif sys.stdin.isatty():
+            print(f"\nThe model wants {label} in the critical layer ({len(rule.pids)} processes):")
+            for pid in rule.pids[:5]:
+                row = by_pid[pid]
+                print(f"  {pid:>7}  {row.record.comm:<16} {row.decision.reason:<28} {row.state['command_line'][:60]}")
+            if input("Approve? It will preempt everything else. [y/N] ").strip().lower() in ("y", "yes"):
+                names = ", ".join(sorted({by_pid[pid].record.comm for pid in rule.pids}))
+                approvals.approve(rule, hashes, names, host.now())
+                approved_now = True
+                kept.append(rule)
+        else:
+            print(f"iawp: held back {label}: critical placements need approval; "
+                  "run `iawp apply` in a terminal to approve", file=sys.stderr)
+    if approved_now:
+        approvals.save(host)
+    return kept
+
+
+def cmd_rollback(args: argparse.Namespace) -> int:
+    print(applier.rollback(_host(args)))
+    return 0
+
+
+def cmd_stop(args: argparse.Namespace) -> int:
+    print(applier.stop(_host(args)))
+    return 0
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    print(applier.status(_host(args)))
+    return 0
+
+
+def _host(args: argparse.Namespace) -> applier.Host:
+    return applier.Host(state_dir=Path(args.state_dir), proc_root=Path(args.proc_root))
+
+
 def _cache_path(args: argparse.Namespace) -> Path:
     from iawp.classify.cache import default_path
 
@@ -199,7 +271,8 @@ def _print_table(header: tuple[str, ...], rows: list[tuple[str, ...]]) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--backend", choices=BACKENDS, default="mock", help="classifier backend (default: mock)")
+    common.add_argument("--backend", choices=BACKENDS, default="local",
+                        help="classifier backend (default: local; mock for tests and demos)")
     common.add_argument("--url", help="SystemOne server for the local/hosted backends")
     common.add_argument("--model", help="model to request; pin an exact version for reproducible results")
     common.add_argument("--cache", metavar="FILE", help="answer cache (default: /var/cache/iawp as root, else ~/.cache/iawp)")
@@ -236,6 +309,23 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", metavar="FILE", help="save per-record results and metrics")
     p.set_defaults(func=cmd_eval)
 
+    admin = argparse.ArgumentParser(add_help=False)
+    admin.add_argument("--state-dir", default=str(applier.Host.state_dir), help=argparse.SUPPRESS)
+
+    p = sub.add_parser("apply", parents=[common, admin], help="load a generated config into scx_layered (root)")
+    p.add_argument("--trust-critical", action="store_true",
+                   help="place critical processes without asking (benchmarks; say so when reporting)")
+    p.set_defaults(func=cmd_apply)
+
+    p = sub.add_parser("rollback", parents=[admin], help="go back to the previously applied config (root)")
+    p.set_defaults(func=cmd_rollback, proc_root="/proc")
+
+    p = sub.add_parser("stop", parents=[admin], help="unload scx_layered; the kernel's default scheduler takes over (root)")
+    p.set_defaults(func=cmd_stop, proc_root="/proc")
+
+    p = sub.add_parser("status", parents=[admin], help="show what scheduler and config are running")
+    p.set_defaults(func=cmd_status, proc_root="/proc")
+
     p = sub.add_parser("cache", parents=[common], help="show or clear remembered model answers")
     p.add_argument("action", choices=["stats", "clear"], nargs="?", default="stats")
     p.set_defaults(func=cmd_cache)
@@ -244,7 +334,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.command in ("scan", "explain", "config") and not Path(args.proc_root).is_dir():
+    if args.command in ("scan", "explain", "config", "apply") and not Path(args.proc_root).is_dir():
         print(f"iawp: {args.proc_root} not found; iawp reads Linux's /proc and must run on Linux", file=sys.stderr)
         return 1
     try:
@@ -253,4 +343,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"iawp: {e}", file=sys.stderr)
         if isinstance(e, ServerUnreachable) and args.backend == "local":
             print("iawp: start a local model server (see docs), or use --backend mock", file=sys.stderr)
+        return 1
+    except applier.ApplyError as e:
+        print(f"iawp: {e}", file=sys.stderr)
         return 1
