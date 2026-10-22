@@ -26,6 +26,7 @@ class FakeHost(ap.Host):
         self.proc_root.mkdir()
         self.set_sched("disabled", "")
         self.active = False
+        self.loaded = False  # systemd has not started the unit yet
         self.root = True
         self.calls = []
         self.clock = 1_760_000_000.0
@@ -45,10 +46,14 @@ class FakeHost(ap.Host):
         if cmd[0] == SCX and cmd[1] == "--print-and-exit":
             text = open(cmd[2][2:]).read()
             return subprocess.CompletedProcess(cmd, 1, "", "parse error") if "BAD" in text else ok
+        if cmd[:2] == ("systemctl", "reset-failed") and not self.loaded:
+            return subprocess.CompletedProcess(cmd, 1, "", f"Unit {cmd[2]} not loaded.")  # as real systemd does
         if cmd[:2] == ("systemctl", "restart"):
+            self.loaded = True
             if "NOSTART" in self.current.read_text():
                 self.active = False
                 self.set_sched("disabled", "")
+                return subprocess.CompletedProcess(cmd, 1, "", "Job failed")
             else:
                 self.active = True
                 self.set_sched("enabled", "layered_1.1.3_x86_64")
@@ -129,12 +134,15 @@ def test_failed_start_rolls_back(host):
         ap.apply(host, "NOSTART config two\n")
     assert host.current.read_text() == "config one\n"
     assert ap.sched_state(host).layered
+    assert len(ap.history(host)) == 1  # the config that never ran is not kept
 
 
 def test_failed_first_start_stops(host):
     with pytest.raises(ap.ApplyError, match="stopped it, so the kernel uses its default scheduler"):
         ap.apply(host, "NOSTART config\n")
     assert not host.active
+    assert ap.history(host) == [] and not host.current.is_symlink()
+    assert "(none applied yet)" in ap.status(host)
 
 
 def test_rollback_walks_history(host):

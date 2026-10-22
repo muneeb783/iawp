@@ -251,6 +251,14 @@ def _unit_active(host: Host) -> bool:
     return host.run("systemctl", "is-active", "--quiet", UNIT).returncode == 0
 
 
+def _start(host: Host) -> None:
+    # Both exit codes are ignored on purpose. reset-failed refuses a unit systemd
+    # has not loaded yet (the first apply), and a failed start is caught by
+    # _wait_layered, which leads to the rollback instead of a bare error.
+    host.run("systemctl", "reset-failed", UNIT)
+    host.run("systemctl", "restart", UNIT)
+
+
 def _wait_layered(host: Host) -> bool:
     waited = 0.0
     while waited < host.settle_seconds:
@@ -264,8 +272,7 @@ def _wait_layered(host: Host) -> bool:
 def restart_with(host: Host, path: Path, previous: Path | None) -> None:
     """Point the service at `path` and restart; on failure go back to `previous`."""
     point_current(host, path)
-    _systemctl(host, "reset-failed", UNIT)
-    _systemctl(host, "restart", UNIT)
+    _start(host)
     if _wait_layered(host):
         return
     log = host.run("journalctl", "-u", UNIT, "-n", "20", "--no-pager").stdout.strip()
@@ -274,8 +281,7 @@ def restart_with(host: Host, path: Path, previous: Path | None) -> None:
         raise ApplyError(f"scx_layered did not come up with {path.name}; stopped it, so the kernel uses its "
                          f"default scheduler.\n{log}")
     point_current(host, previous)
-    _systemctl(host, "reset-failed", UNIT)
-    _systemctl(host, "restart", UNIT)
+    _start(host)
     ok = _wait_layered(host)
     raise ApplyError(f"scx_layered did not come up with {path.name}; rolled back to {previous.name}"
                      f"{'' if ok else ' (which also failed to start)'}.\n{log}")
@@ -292,7 +298,14 @@ def apply(host: Host, text: str) -> str:
     previous = _target(host)
     path = save(host, text)
     ensure_unit(host, scx)
-    restart_with(host, path, previous)
+    try:
+        restart_with(host, path, previous)
+    except ApplyError:
+        # History holds only configs that ran, so rollback never lands on one that did not.
+        if _target(host) == path.resolve():
+            host.current.unlink()
+        path.unlink()
+        raise
     return f"applied {path.name}; scx_layered is running it"
 
 
