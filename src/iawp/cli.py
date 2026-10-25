@@ -1,4 +1,4 @@
-"""iawp command line: scan, explain, config, eval, cache, apply, rollback, stop, status."""
+"""iawp command line: scan, explain, config, eval, cache, apply, watch, rollback, stop, status."""
 
 from __future__ import annotations
 
@@ -28,8 +28,10 @@ class Row:
 
 
 def classify_all(args: argparse.Namespace) -> list[Row]:
-    backend = get_backend(args.backend, args.url, args.model, None if args.no_cache else _cache_path(args))
-    args.classifier = backend  # scan reports cache hits
+    backend = getattr(args, "classifier", None)  # watch scans many times with one backend
+    if backend is None:
+        backend = get_backend(args.backend, args.url, args.model, None if args.no_cache else _cache_path(args))
+        args.classifier = backend  # scan reports cache hits
     if args.backend == "hosted":
         print(f"iawp: sending redacted details of uncached processes to {HOSTED_URL}", file=sys.stderr)
     thresholds = Thresholds(critical=args.critical_threshold, other=args.threshold)
@@ -189,7 +191,11 @@ def cmd_apply(args: argparse.Namespace) -> int:
     applier.preflight(host)  # refuse before asking the model or the operator anything
     rows = classify_all(args)
     rules, unmatched = plan(rows)
-    rules = gate_critical(args, host, rows, rules)
+    rules, held = gate_critical(args, host, rows, rules, ask=sys.stdin.isatty())
+    for label in held:
+        print(f"iawp: held back {label}: critical placements need approval; "
+              "run `iawp apply` in a terminal to approve", file=sys.stderr)
+    applier.save_pending(host, held, host.now())
     print(applier.apply(host, render(build_config(rules))))
     if unmatched:
         print(f"{len(unmatched)} classified processes have no safe match rule and stay in default "
@@ -197,16 +203,18 @@ def cmd_apply(args: argparse.Namespace) -> int:
     return 0
 
 
-def gate_critical(args: argparse.Namespace, host: applier.Host, rows: list[Row], rules: list[Rule]) -> list[Rule]:
+def gate_critical(args: argparse.Namespace, host: applier.Host, rows: list[Row], rules: list[Rule],
+                  ask: bool) -> tuple[list[Rule], list[str]]:
     """Keep a critical rule only if an operator approved it (now or before).
 
     A wrong critical placement hurts the service being protected, and the
     model is not reliable enough to make one alone. Batch and background
-    rules pass through untouched.
+    rules pass through untouched. Returns the kept rules and the labels of
+    the critical ones held back.
     """
     approvals = applier.Approvals.load(host)
     by_pid = {row.record.pid: row for row in rows}
-    kept, approved_now = [], False
+    kept, held, approved_now = [], [], False
     for rule in rules:
         if rule.layer != "critical":
             kept.append(rule)
@@ -218,7 +226,7 @@ def gate_critical(args: argparse.Namespace, host: applier.Host, rows: list[Row],
         elif args.trust_critical:
             print(f"iawp: --trust-critical: placing {label} in critical without approval", file=sys.stderr)
             kept.append(rule)
-        elif sys.stdin.isatty():
+        elif ask:
             print(f"\nThe model wants {label} in the critical layer ({len(rule.pids)} processes):")
             for pid in rule.pids[:5]:
                 row = by_pid[pid]
@@ -228,12 +236,41 @@ def gate_critical(args: argparse.Namespace, host: applier.Host, rows: list[Row],
                 approvals.approve(rule, hashes, names, host.now())
                 approved_now = True
                 kept.append(rule)
+            else:
+                held.append(label)
         else:
-            print(f"iawp: held back {label}: critical placements need approval; "
-                  "run `iawp apply` in a terminal to approve", file=sys.stderr)
+            held.append(label)
     if approved_now:
         approvals.save(host)
-    return kept
+    return kept, held
+
+
+def cmd_watch(args: argparse.Namespace) -> int:
+    from iawp import watch
+
+    host = _host(args)
+    applier.preflight(host)
+
+    def scan() -> watch.Snapshot:
+        rows = classify_all(args)
+        rules, _ = plan(rows)
+        rules, held = gate_critical(args, host, rows, rules, ask=False)
+        return watch.Snapshot(rules, held, [row.record for row in rows if not row.record.kernel_thread])
+
+    timing = watch.Timing(settle=args.settle, cooldown=args.cooldown, sticky=args.sticky, rescan=args.rescan)
+    watcher = watch.Watcher(host, scan, timing, log=_log)
+    if args.once:
+        watcher.step(host.now())
+        return 0
+    try:
+        watch.run(watcher, watch.event_source(Path(args.proc_root), args.poll), host.now)
+    except KeyboardInterrupt:
+        _log("stopped watching; scx_layered keeps running its config (`iawp stop` unloads it)")
+    return 0
+
+
+def _log(message: str) -> None:
+    print(f"{time.strftime('%H:%M:%S')} {message}", flush=True)
 
 
 def cmd_rollback(args: argparse.Namespace) -> int:
@@ -319,6 +356,21 @@ def build_parser() -> argparse.ArgumentParser:
                    help="place critical processes without asking (benchmarks; say so when reporting)")
     p.set_defaults(func=cmd_apply)
 
+    p = sub.add_parser("watch", parents=[common, admin], help="keep the applied config current as programs start (root)")
+    p.add_argument("--trust-critical", action="store_true",
+                   help="place critical processes without approval (benchmarks; say so when reporting)")
+    p.add_argument("--settle", type=float, default=2.0, metavar="S",
+                   help="wait after a new program appears, so a burst costs one rescan (default: %(default)s)")
+    p.add_argument("--cooldown", type=float, default=120.0, metavar="S",
+                   help="min seconds between scx_layered restarts (default: %(default)s)")
+    p.add_argument("--sticky", type=float, default=3600.0, metavar="S",
+                   help="keep a rule this long after its last process exits (default: %(default)s)")
+    p.add_argument("--rescan", type=float, default=300.0, metavar="S",
+                   help="full rescan interval, in case events were missed (default: %(default)s)")
+    p.add_argument("--poll", action="store_true", help="poll /proc instead of using the kernel's process events")
+    p.add_argument("--once", action="store_true", help=argparse.SUPPRESS)
+    p.set_defaults(func=cmd_watch)
+
     p = sub.add_parser("rollback", parents=[admin], help="go back to the previously applied config (root)")
     p.set_defaults(func=cmd_rollback, proc_root="/proc")
 
@@ -336,7 +388,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.command in ("scan", "explain", "config", "apply") and not Path(args.proc_root).is_dir():
+    if args.command in ("scan", "explain", "config", "apply", "watch") and not Path(args.proc_root).is_dir():
         print(f"iawp: {args.proc_root} not found; iawp reads Linux's /proc and must run on Linux", file=sys.stderr)
         return 1
     try:

@@ -10,6 +10,7 @@ State (root only), in /var/lib/iawp:
   configs/<time>.json   every applied config, newest last (the rollback history)
   current.json          symlink to the config the service runs
   approvals.json        critical placements an operator approved
+  pending.json          critical placements `iawp watch` is holding back for approval
 
 scx_layered runs as the systemd unit iawp-scx.service, so crashes restart it
 and its log lands in the journal. The unit is not enabled at boot: a stale
@@ -147,6 +148,22 @@ class Approvals:
         self.rules[_rule_key(rule)] = {"names": names, "approved": stamp}
         for h in hashes:
             self.exe_sha256[h] = {"names": names, "approved": stamp}
+
+
+def save_pending(host: Host, labels: list[str], when: float) -> None:
+    """Record critical placements waiting for approval, for `iawp status`."""
+    path = host.state_dir / "pending.json"
+    if not labels:
+        path.unlink(missing_ok=True)
+        return
+    host.state_dir.mkdir(mode=0o755, parents=True, exist_ok=True)
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(when))
+    _atomic_write(path, json.dumps({"since": stamp, "rules": labels}, indent=1) + "\n")
+
+
+def load_pending(host: Host) -> list[str]:
+    path = host.state_dir / "pending.json"
+    return json.loads(path.read_text())["rules"] if path.exists() else []
 
 
 def _rule_key(rule: Rule) -> str:
@@ -341,6 +358,9 @@ def status(host: Host) -> str:
         f"config:      {target.name if target else '(none applied yet)'}",
         f"history:     {len(history(host))} configs in {host.configs}",
     ]
+    if pending := load_pending(host):
+        lines.append(f"pending:     {len(pending)} critical placements need approval (run `iawp apply`): "
+                     + ", ".join(pending))
     return "\n".join(lines)
 
 
