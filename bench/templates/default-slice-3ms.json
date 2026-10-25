@@ -1,0 +1,6 @@
+{
+	"_comment": "default preempts batch, batch 1 ms slices, and default gets a 3 ms slice (about what the kernel's own scheduler uses on 8 CPUs) so unplaced short jobs (as, ld) cannot hold a CPU for 20 ms.",
+	"critical": { "Open": { "preempt": true, "weight": 1000 } },
+	"batch": { "Open": { "weight": 50, "slice_us": 1000 } },
+	"default": { "Open": { "preempt": true, "slice_us": 3000 } }
+}

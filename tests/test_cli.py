@@ -46,3 +46,18 @@ def test_config_dry_run(server_proc, capsys, tmp_path):
 def test_config_requires_dry_run(server_proc, capsys):
     code, _, err = run(capsys, "config", "--backend", "mock", "--proc-root", str(server_proc))
     assert code == 2 and "--dry-run" in err
+
+
+def test_config_with_template(server_proc, capsys, tmp_path):
+    template = tmp_path / "t.json"
+    template.write_text(json.dumps({"critical": {"Open": {"preempt": True}}, "batch": {"Open": {"slice_us": 1000}},
+                                    "default": {"Open": {}}}))
+    code, out, _ = run(capsys, "config", "--dry-run", "--template", str(template),
+                       "--backend", "mock", "--proc-root", str(server_proc))
+    batch = next(layer for layer in json.loads(out) if layer["name"] == "batch")
+    assert code == 0 and batch["kind"] == {"Open": {"slice_us": 1000}}
+
+    template.write_text(json.dumps({"critical": {}, "default": {}}))
+    code, _, err = run(capsys, "config", "--dry-run", "--template", str(template),
+                       "--backend", "mock", "--proc-root", str(server_proc))
+    assert code == 1 and "no policy for layers: batch" in err

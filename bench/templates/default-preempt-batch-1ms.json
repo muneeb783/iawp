@@ -1,0 +1,6 @@
+{
+	"_comment": "default preempts batch, and batch slices are 1 ms: both fixes from the S1 template screen.",
+	"critical": { "Open": { "preempt": true, "weight": 1000 } },
+	"batch": { "Open": { "weight": 50, "slice_us": 1000 } },
+	"default": { "Open": { "preempt": true } }
+}

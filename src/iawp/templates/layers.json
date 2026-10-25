@@ -1,6 +1,6 @@
 {
-	"_comment": "Layer policies from the Phase 0 lab (bench/configs/s1-hand-g.json): priority, not partitioning. Only membership is generated.",
+	"_comment": "Layer policies: priority, not partitioning; only membership is generated. Chosen by the S1 template screen (bench/templates/default-slice-1ms.json). scx_layered lets a preempting layer preempt only non-preempting ones, so default must preempt batch or a waking default task waits behind batch hogs, which would make default worse than no scx_layered at all. Short batch and default slices bound the remaining waits.",
 	"critical": { "Open": { "preempt": true, "weight": 1000 } },
-	"batch": { "Open": { "weight": 50 } },
-	"default": { "Open": {} }
+	"batch": { "Open": { "weight": 50, "slice_us": 1000 } },
+	"default": { "Open": { "preempt": true, "slice_us": 1000 } }
 }

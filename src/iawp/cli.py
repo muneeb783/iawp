@@ -14,7 +14,7 @@ from iawp import apply as applier
 from iawp.classify.systemone import HOSTED_URL
 from iawp.classify import BACKENDS, Classification, ClassifierError, ServerUnreachable, build_state, get_backend
 from iawp.collector import ProcessRecord, collect
-from iawp.emit import Placed, Rule, Unmatched, build_config, diff, plan_rules, render
+from iawp.emit import Placed, Rule, TemplateError, Unmatched, build_config, diff, load_template, plan_rules, render
 from iawp.policy import Decision, Thresholds, decide
 from iawp.taxonomy import LAYER_ORDER, UNKNOWN
 
@@ -123,7 +123,7 @@ def cmd_config(args: argparse.Namespace) -> int:
         return 2
     rows = classify_all(args)
     rules, unmatched = plan(rows)
-    text = render(build_config(rules))
+    text = render(build_config(rules, load_template(args.template)))
     if args.output:
         Path(args.output).write_text(text)
         print(f"wrote {args.output}", file=sys.stderr)
@@ -196,7 +196,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
         print(f"iawp: held back {label}: critical placements need approval; "
               "run `iawp apply` in a terminal to approve", file=sys.stderr)
     applier.save_pending(host, held, host.now())
-    print(applier.apply(host, render(build_config(rules))))
+    print(applier.apply(host, render(build_config(rules, load_template(args.template)))))
     if unmatched:
         print(f"{len(unmatched)} classified processes have no safe match rule and stay in default "
               "(see `iawp config --dry-run`)", file=sys.stderr)
@@ -258,7 +258,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
         return watch.Snapshot(rules, held, [row.record for row in rows if not row.record.kernel_thread])
 
     timing = watch.Timing(settle=args.settle, cooldown=args.cooldown, sticky=args.sticky, rescan=args.rescan)
-    watcher = watch.Watcher(host, scan, timing, log=_log)
+    watcher = watch.Watcher(host, scan, timing, log=_log, template=load_template(args.template))
     if args.once:
         watcher.step(host.now())
         return 0
@@ -320,6 +320,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="min probability for batch/other layers (default: %(default)s)")
     common.add_argument("--critical-threshold", type=float, default=Thresholds.critical,
                         help="min probability for the critical layer (default: %(default)s)")
+    common.add_argument("--template", metavar="FILE",
+                        help="layer policies (slices, weights, preemption) instead of the built-in template")
     common.add_argument("--proc-root", default="/proc", help=argparse.SUPPRESS)
 
     parser = argparse.ArgumentParser(prog="iawp", description="Intent-aware workload placement for scx_layered.")
@@ -398,6 +400,6 @@ def main(argv: list[str] | None = None) -> int:
         if isinstance(e, ServerUnreachable) and args.backend == "local":
             print("iawp: start a local model server (see docs), or use --backend mock", file=sys.stderr)
         return 1
-    except applier.ApplyError as e:
+    except (applier.ApplyError, TemplateError) as e:
         print(f"iawp: {e}", file=sys.stderr)
         return 1

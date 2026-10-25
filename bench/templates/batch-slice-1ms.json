@@ -1,0 +1,6 @@
+{
+	"_comment": "S1 finding: with 20 ms batch slices, a non-preempting default-layer task that wakes waits for a hog's slice to end. Short batch slices bound that wait.",
+	"critical": { "Open": { "preempt": true, "weight": 1000 } },
+	"batch": { "Open": { "weight": 50, "slice_us": 1000 } },
+	"default": { "Open": {} }
+}

@@ -177,9 +177,24 @@ def _comm_rule(p: Placed, procs: list[Placed], effective: dict[int, str]):
     return ("PcommPrefix", comm, [q.record.pid for q in members]), ""
 
 
-def load_template() -> dict[str, dict]:
-    text = resources.files("iawp").joinpath("templates/layers.json").read_text()
-    return {k: v for k, v in json.loads(text).items() if not k.startswith("_")}
+class TemplateError(ValueError):
+    """A layer policy template that cannot be read or lacks a layer."""
+
+
+def load_template(path: str | None = None) -> dict[str, dict]:
+    """Layer policies by layer name; the built-in, lab-tested one unless `path` is given."""
+    try:
+        if path:
+            with open(path) as f:
+                text = f.read()
+        else:
+            text = resources.files("iawp").joinpath("templates/layers.json").read_text()
+        template = {k: v for k, v in json.loads(text).items() if not k.startswith("_")}
+    except (OSError, ValueError) as e:
+        raise TemplateError(f"cannot read template {path}: {e}") from None
+    if missing := [name for name in LAYER_ORDER if name not in template]:
+        raise TemplateError(f"template {path} has no policy for layers: {', '.join(missing)}")
+    return template
 
 
 def build_config(rules: list[Rule], template: dict[str, dict] | None = None) -> list[dict]:

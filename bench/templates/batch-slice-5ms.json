@@ -1,0 +1,6 @@
+{
+	"_comment": "Between the 20 ms default and 1 ms: less switching for batch, longer waits for default.",
+	"critical": { "Open": { "preempt": true, "weight": 1000 } },
+	"batch": { "Open": { "weight": 50, "slice_us": 5000 } },
+	"default": { "Open": {} }
+}

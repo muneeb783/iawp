@@ -1,0 +1,6 @@
+{
+	"_comment": "iawp's original built-in template, from the Phase 0 schbench lab (bench/configs/s1-hand-g.json). Kept to reproduce the S1 finding: default neither preempts nor has a short slice, so default-layer tasks wait behind batch hogs.",
+	"critical": { "Open": { "preempt": true, "weight": 1000 } },
+	"batch": { "Open": { "weight": 50 } },
+	"default": { "Open": {} }
+}

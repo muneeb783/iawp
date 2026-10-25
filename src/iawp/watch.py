@@ -163,6 +163,7 @@ class Watcher:
     scan: Callable[[], Snapshot]
     timing: Timing = field(default_factory=Timing)
     log: Callable[[str], None] = print
+    template: dict[str, dict] | None = None  # layer policies; None: the built-in template
 
     dirty_since: float | None = None
     next_rescan: float = 0.0  # 0: scan on the first step
@@ -217,7 +218,7 @@ class Watcher:
                 self.log(f"held back {label}: critical placements need approval; run `iawp apply` in a terminal")
             self.held = snap.held
             applier.save_pending(self.host, snap.held, now)
-        text = render(build_config(self._with_sticky(now, snap)))
+        text = render(build_config(self._with_sticky(now, snap), self.template))
         self.want = None if self._in_effect(text) else text
         self.waiting_logged = False
 

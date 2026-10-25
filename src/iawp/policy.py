@@ -2,8 +2,13 @@
 
 Errors are asymmetric: wrongly promoting a batch job into `critical` hurts the
 service it was meant to protect, while missing a critical task only leaves it
-in `default` (today's status quo). So anything uncertain goes to `default`,
-and `critical` demands the highest confidence.
+in `default`. So anything uncertain goes to `default`, and `critical` demands
+the highest confidence.
+
+That only holds if `default` is no worse than running without scx_layered,
+which depends on the layer template: `default` must preempt `batch` (see
+templates/layers.json). With the Phase 0 template, an nginx left in default
+under batch noise served 2k of 20k requests/s.
 """
 
 from __future__ import annotations

@@ -1,0 +1,6 @@
+{
+	"_comment": "S1 finding: a non-preempting default layer waits behind batch hogs. Here default preempts batch (scx_layered: preempting layers preempt only non-preempting ones), so critical and default no longer preempt each other.",
+	"critical": { "Open": { "preempt": true, "weight": 1000 } },
+	"batch": { "Open": { "weight": 50 } },
+	"default": { "Open": { "preempt": true } }
+}
