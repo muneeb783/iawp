@@ -144,3 +144,17 @@ def test_cli_dry_run_passes_options_through(capsys, tmp_path):
     assert code == 0
     assert "arm=noise run=1/1" in out and "arm=iawp run=1/1" in out and "arm=hand" not in out
     assert f"apply --trust-critical --template {t}" in out and "-R20000" in out
+
+
+def test_chart_renders(tmp_path):
+    pytest.importorskip("matplotlib")
+    spec = importlib.util.spec_from_file_location("bench_chart", ROOT / "bench" / "chart.py")
+    chart = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(chart)
+    stat = {"median": 2.0, "min": 1.9, "max": 2.2, "n": 2}
+    (tmp_path / "summary.json").write_text(json.dumps({
+        "alone": {"runs": 2, "errors": 0, "p50": stat, "p99": stat, "p999": stat},
+        "iawp": {"runs": 2, "errors": 0, "p50": stat, "p99": stat, "p999": stat, "stress_ops": stat},
+    }))
+    assert chart.main([str(tmp_path)]) == 0
+    assert (tmp_path / "chart.png").read_bytes()[:4] == b"\x89PNG"
