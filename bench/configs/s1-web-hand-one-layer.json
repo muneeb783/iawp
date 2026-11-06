@@ -1,0 +1,22 @@
+[
+	{
+		"name": "critical",
+		"comment": "S1 p99.9 probe: nothing placed, everything in default; tests scx_layered itself",
+		"matches": [
+			[{ "PcommPrefix": "iawpnone" }]
+		],
+		"kind": { "Open": { "preempt": true, "weight": 1000 } }
+	},
+	{
+		"name": "batch",
+		"matches": [
+			[{ "PcommPrefix": "iawpnone" }]
+		],
+		"kind": { "Open": { "weight": 50 } }
+	},
+	{
+		"name": "default",
+		"matches": [[]],
+		"kind": { "Open": {} }
+	}
+]

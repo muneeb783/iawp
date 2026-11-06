@@ -1,0 +1,23 @@
+[
+	{
+		"name": "critical",
+		"comment": "S1 p99.9 probe: nginx and the load generator in critical, the build left in default",
+		"matches": [
+			[{ "PcommPrefix": "nginx" }],
+			[{ "PcommPrefix": "wrk" }]
+		],
+		"kind": { "Open": { "preempt": true, "weight": 1000 } }
+	},
+	{
+		"name": "batch",
+		"matches": [
+			[{ "PcommPrefix": "stress-ng" }]
+		],
+		"kind": { "Open": { "weight": 50 } }
+	},
+	{
+		"name": "default",
+		"matches": [[]],
+		"kind": { "Open": {} }
+	}
+]

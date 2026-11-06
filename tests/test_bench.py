@@ -103,7 +103,7 @@ def test_slow_setup_is_refused():
             return super().run(cmd, log)
 
     lab = SlowApply(echo=False)
-    b = bench.Bench(lab, bench.S1(rate=1000, ncpu=8), Path("/nonexistent"), "/opt/iawp", runs=1,
+    b = bench.Bench(lab, bench.S1(rate=1000, pre=10, ncpu=8), Path("/nonexistent"), "/opt/iawp", runs=1,
                     arms=("iawp",), cooldown=0, log=lambda m: None)
     with pytest.raises(bench.BenchError, match="raise --pre"):
         b.run_all()
@@ -158,3 +158,19 @@ def test_chart_renders(tmp_path):
     }))
     assert chart.main([str(tmp_path)]) == 0
     assert (tmp_path / "chart.png").read_bytes()[:4] == b"\x89PNG"
+
+
+def test_cli_noise_and_hand_config_options(capsys, tmp_path):
+    client = ROOT / "bench" / "configs" / "s1-web-hand-client.json"
+    code = bench.main(["s1", "--rate", "20000", "--runs", "1", "--arms", "noise,hand", "--noise", "stress",
+                       "--hand-config", str(client), "--label", "x", "--iawp", "/opt/iawp", "--dry-run"])
+    out = capsys.readouterr().out
+    assert code == 0 and "stress-ng" in out and "bash -c" not in out  # build loop left out
+    with pytest.raises(SystemExit):
+        bench.main(["s1", "--rate", "1", "--noise", "fans", "--dry-run"])
+    assert "unknown noise sources: fans" in capsys.readouterr().err
+
+
+def test_client_hand_config_protects_the_load_generator():
+    hand = json.loads(bench.hand_config(ROOT / "bench" / "configs" / "s1-web-hand-client.json", bench.DEFAULT_TEMPLATE))
+    assert {"PcommPrefix": "wrk"} in [m[0] for m in hand[0]["matches"]]

@@ -1,0 +1,6 @@
+{
+	"_comment": "S1 reserved-CPU probe: critical owns 2 CPUs (protected) and may also spill onto the shared CPUs; batch and default never run on the owned ones.",
+	"critical": { "Grouped": { "util_range": [0.25, 0.6], "cpus_range": [2, 2], "protected": true, "preempt": true, "weight": 1000 } },
+	"batch": { "Open": { "weight": 50, "slice_us": 1000 } },
+	"default": { "Open": { "preempt": true, "slice_us": 1000 } }
+}

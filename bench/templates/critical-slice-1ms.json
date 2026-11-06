@@ -1,0 +1,6 @@
+{
+	"_comment": "S1 p99.9 probe: the built-in template with a 1 ms critical slice, so a critical task cannot hold a CPU for 20 ms against preempting default tasks.",
+	"critical": { "Open": { "preempt": true, "weight": 1000, "slice_us": 1000 } },
+	"batch": { "Open": { "weight": 50, "slice_us": 1000 } },
+	"default": { "Open": { "preempt": true, "slice_us": 1000 } }
+}

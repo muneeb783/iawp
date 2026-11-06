@@ -1,0 +1,26 @@
+[
+	{
+		"name": "critical",
+		"comment": "S1 p99.9 probe: the hand-written config plus the load generator in critical, standing in for a client on another machine",
+		"matches": [
+			[{ "PcommPrefix": "nginx" }],
+			[{ "PcommPrefix": "wrk" }]
+		],
+		"kind": { "Open": { "preempt": true, "weight": 1000 } }
+	},
+	{
+		"name": "batch",
+		"matches": [
+			[{ "PcommPrefix": "stress-ng" }],
+			[{ "PcommPrefix": "make" }],
+			[{ "PcommPrefix": "cc1" }],
+			[{ "PcommPrefix": "gcc" }]
+		],
+		"kind": { "Open": { "weight": 50 } }
+	},
+	{
+		"name": "default",
+		"matches": [[]],
+		"kind": { "Open": {} }
+	}
+]

@@ -1,0 +1,6 @@
+{
+	"_comment": "S1 reserved-CPU probe: critical runs only on 2 CPUs of its own (protected: no other layer uses them, even when idle), so build churn on the other CPUs cannot delay it. Costs batch those 2 CPUs.",
+	"critical": { "Confined": { "util_range": [0.25, 0.6], "cpus_range": [2, 2], "protected": true, "preempt": true, "weight": 1000 } },
+	"batch": { "Open": { "weight": 50, "slice_us": 1000 } },
+	"default": { "Open": { "preempt": true, "slice_us": 1000 } }
+}

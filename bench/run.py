@@ -203,11 +203,12 @@ class _FakeProc:
 class S1:
     rate: int
     duration: int = 30  # measured seconds per run
-    pre: int = 10  # seconds from noise start to measuring: ramp-up, and the arm's own setup
+    pre: int = 20  # seconds from noise start to measuring: ramp-up, and the arm's own setup (iawp apply)
     ncpu: int = field(default_factory=lambda: os.cpu_count() or 8)
     hand_config: Path = HERE / "configs" / "s1-web-hand.json"
     url: str = "http://127.0.0.1/"
     name: str = "s1"
+    noise: tuple[str, ...] = ("stress", "build")  # which noise sources run
 
     def load_cmd(self, rate: int | None = None, duration: int | None = None) -> list[str]:
         return ["wrk2", "-t2", "-c64", f"-d{duration or self.duration}s", f"-R{rate or self.rate}", "--latency", self.url]
@@ -220,10 +221,11 @@ class S1:
             f"make -s -j{self.ncpu} -C src linux >/dev/null 2>&1 && ((SECONDS<=end)) && n=$((n+1)); done; "
             f'echo "builds $n in {window} s"'
         )
-        return [
+        sources = [
             ("stress", ["stress-ng", "--cpu", str(self.ncpu), "--metrics-brief", "--timeout", f"{window}s"], None),
             ("build", ["bash", "-c", build_loop], BUILD_DIR),
         ]
+        return [s for s in sources if s[0] in self.noise]
 
 
 # ------------------------------------------------------------------ running
@@ -353,6 +355,7 @@ class Bench:
             "load": " ".join(s.load_cmd()),
             "noise": [" ".join(cmd) for _, cmd, _ in s.noise_cmds()],
             "pre_seconds": s.pre,
+            "hand_config": str(s.hand_config),
             "arms": list(self.arms),
             "runs": self.runs,
             "iawp_flags": "apply --trust-critical (critical placements not operator-approved)",
@@ -493,7 +496,11 @@ def main(argv: list[str] | None = None) -> int:
     s1.add_argument("--rate", type=int, help="wrk2 requests per second (see `calibrate`)")
     s1.add_argument("--runs", type=int, default=5)
     s1.add_argument("--duration", type=int, default=30, help="measured seconds per run (default: %(default)s)")
-    s1.add_argument("--pre", type=int, default=10, help="seconds of noise before measuring (default: %(default)s)")
+    s1.add_argument("--pre", type=int, default=20, help="seconds of noise before measuring (default: %(default)s)")
+    s1.add_argument("--noise", default="stress,build", help="noise sources: stress, build (default: %(default)s)")
+    s1.add_argument("--hand-config", type=Path, default=S1.hand_config,
+                    help="hand-written membership; layer policies still come from --template")
+    s1.add_argument("--label", help="suffix for the results directory name")
     s1.add_argument("--arms", default=",".join(ARMS), help="comma-separated subset of %(default)s")
     s1.add_argument("--iawp", default=default_iawp(), help="iawp executable (default: %(default)s)")
     s1.add_argument("--template", type=Path, default=DEFAULT_TEMPLATE,
@@ -517,9 +524,13 @@ def main(argv: list[str] | None = None) -> int:
         arms = tuple(a for a in args.arms.split(",") if a)
         if bad := [a for a in arms if a not in ARMS]:
             p.error(f"unknown arms: {', '.join(bad)}")
-        label = "" if args.template == DEFAULT_TEMPLATE else f"-{args.template.stem}"
+        noise = tuple(n for n in args.noise.split(",") if n)
+        if bad := [n for n in noise if n not in ("stress", "build")]:
+            p.error(f"unknown noise sources: {', '.join(bad)}")
+        label = f"-{args.label}" if args.label else ("" if args.template == DEFAULT_TEMPLATE else f"-{args.template.stem}")
         out = Path(args.out) if args.out else HERE / "results" / f"{time.strftime('%Y%m%d-%H%M%S')}-s1{label}"
-        bench = Bench(lab, S1(args.rate, args.duration, args.pre), out, args.iawp,
+        scenario = S1(args.rate, args.duration, args.pre, hand_config=args.hand_config.resolve(), noise=noise)
+        bench = Bench(lab, scenario, out, args.iawp,
                       runs=args.runs, arms=arms, template=args.template.resolve())
         try:
             bench.run_all()

@@ -1,0 +1,34 @@
+[
+	{
+		"name": "critical",
+		"comment": "S1 p99.9 probe: every program the build runs in batch, not just make, cc1 and gcc",
+		"matches": [
+			[{ "PcommPrefix": "nginx" }]
+		],
+		"kind": { "Open": { "preempt": true, "weight": 1000 } }
+	},
+	{
+		"name": "batch",
+		"matches": [
+			[{ "PcommPrefix": "stress-ng" }],
+			[{ "PcommPrefix": "make" }],
+			[{ "PcommPrefix": "cc1" }],
+			[{ "PcommPrefix": "gcc" }],
+			[{ "PcommPrefix": "as" }],
+			[{ "PcommPrefix": "ld" }],
+			[{ "PcommPrefix": "collect2" }],
+			[{ "PcommPrefix": "x86_64-linux-gn" }],
+			[{ "PcommPrefix": "ar" }],
+			[{ "PcommPrefix": "ranlib" }],
+			[{ "PcommPrefix": "rm" }],
+			[{ "PcommPrefix": "sh" }],
+			[{ "PcommPrefix": "bash" }]
+		],
+		"kind": { "Open": { "weight": 50 } }
+	},
+	{
+		"name": "default",
+		"matches": [[]],
+		"kind": { "Open": {} }
+	}
+]
