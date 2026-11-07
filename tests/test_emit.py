@@ -1,6 +1,9 @@
 import json
 import random
 
+import pytest
+
+from iawp import emit
 from iawp.classify import build_state
 from iawp.classify.mock import MockClassifier
 from iawp.collector import collect
@@ -23,7 +26,7 @@ def test_rules_for_server(server_proc):
     rules, unmatched = plan_rules(placed(server_proc))
     assert as_set(rules) == {
         ("critical", "CgroupPrefix", "system.slice/nginx.service/"),
-        ("critical", "CgroupPrefix", "system.slice/postgresql@16-main.service/"),
+        ("critical", "CgroupPrefix", "system.slice/system-postgresql.slice/postgresql@16-main.service/"),
         ("batch", "PcommPrefix", "make"),
         ("batch", "PcommPrefix", "cc1"),
         ("batch", "CgroupPrefix", "system.slice/cron.service/"),
@@ -85,7 +88,7 @@ def test_longer_name_rule_folds_into_shorter(server_proc):
     assert [(r.value, r.pids) for r in stress] == [("stress-ng", (900, 901))]
 
 
-PG = "system.slice/postgresql@16-main.service"
+PG = "system.slice/system-postgresql.slice/postgresql@16-main.service"
 
 
 def with_decisions(ps, **by_pid):
@@ -161,3 +164,15 @@ def test_workers_cannot_make_a_service_critical(server_proc):
     assert not any(r.value == job + "/" for r in rules)
     assert "only a main process can make a service critical" in next(
         u.reason for u in unmatched if u.placed.record.pid == 901)
+
+
+@pytest.mark.parametrize("cgroup, dedicated", [
+    ("system.slice/nginx.service", True),
+    ("system.slice/system-postgresql.slice/postgresql@18-main.service", True),  # template instance
+    ("system.slice/system-getty.slice/getty@tty1.service", True),
+    ("system.slice/system-postgresql.slice", False),  # the slice holds every instance
+    ("user.slice/user-1000.slice/session-3.scope", False),
+    ("system.slice/a.slice/b.slice/c.service", False),
+])
+def test_dedicated_cgroups(cgroup, dedicated):
+    assert emit._dedicated(cgroup) is dedicated

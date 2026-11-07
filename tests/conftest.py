@@ -37,7 +37,7 @@ def server_proc(tmp_path: Path) -> Path:
     make_proc(root, 100, "nginx", ["nginx: master process /usr/sbin/nginx"], cgroup="system.slice/nginx.service", exe="/usr/sbin/nginx")
     make_proc(root, 101, "nginx", ["nginx: worker process"], ppid=100, uid=33, cgroup="system.slice/nginx.service", exe="/usr/sbin/nginx")
     make_proc(root, 200, "postgres", ["/usr/lib/postgresql/16/bin/postgres", "-D", "/var/lib/postgresql/16/main"],
-              uid=111, cgroup="system.slice/postgresql@16-main.service")
+              uid=111, cgroup="system.slice/system-postgresql.slice/postgresql@16-main.service")  # template unit: systemd nests it
     make_proc(root, 300, "bash", ["-bash"], uid=1000, cgroup=SESSION)
     make_proc(root, 400, "python3", ["python3", "serve.py", "--port", "8080"], ppid=300, uid=1000, cgroup=SESSION)
     make_proc(root, 401, "python3", ["python3", "train.py", "--epochs", "10"], ppid=300, uid=1000, cgroup=SESSION)

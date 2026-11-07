@@ -6,6 +6,8 @@ exactly the processes we mean. scx_layered matches on kernel-visible facts
 serve.py` and `python train.py` look identical to it by name. Rules:
 
 1. A cgroup dedicated to one service or container (system.slice/nginx.service,
+   an instance of a template unit such as
+   system.slice/system-postgresql.slice/postgresql@18-main.service,
    docker-<id>.scope, kubepods...) is placed as a whole: one CgroupPrefix
    rule, layer chosen by the service's main process. scx_layered cannot split
    a service anyway (postgres autovacuum shares the database's name and
@@ -42,7 +44,7 @@ AMBIGUOUS_COMMS = {
 }
 
 _DEDICATED_CGROUP = [
-    re.compile(r"^system\.slice/[^/]+\.service$"),
+    re.compile(r"^system\.slice/(system-[^/]+\.slice/)?[^/]+\.service$"),  # template instances sit in system-<name>.slice
     re.compile(r"^system\.slice/(docker|cri-containerd|crio|libpod)-[0-9a-f]+\.scope$"),
     re.compile(r"^kubepods[./].*pod[0-9a-f_-]{8,}"),  # refined in Phase 4 (Kubernetes)
 ]
