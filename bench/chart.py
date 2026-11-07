@@ -27,7 +27,9 @@ PANELS = [  # key, title, unit
     ("p99", "p99 latency", "ms"),
     ("p999", "p99.9 latency", "ms"),
     ("stress_ops", "noise throughput (stress-ng)", "bogo ops/s"),
+    ("dumps_min", "noise throughput (backups)", "dumps/min"),
 ]
+SERVICES = {"s1": ("nginx", "req/s"), "s2": ("postgres", "transactions/s")}  # scenario -> what the title names
 
 
 def draw(summary: dict, title: str, out: Path) -> None:
@@ -91,7 +93,8 @@ def main(argv: list[str] | None = None) -> int:
         meta_path = args.dir / "meta.json"
         meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
         rate = next((w[2:] for w in meta.get("load", "").split() if w.startswith("-R")), "?")
-        title = f"{meta.get('scenario', 'bench').upper()}: nginx at {rate} req/s, {meta.get('cpus', '?')} CPUs"
+        service, unit = SERVICES.get(meta.get("scenario", "s1"), ("service", "/s"))
+        title = f"{meta.get('scenario', 'bench').upper()}: {service} at {rate} {unit}, {meta.get('cpus', '?')} CPUs"
     out = args.output or args.dir / "chart.png"
     draw(summary, title, out)
     print(f"wrote {out}")

@@ -66,6 +66,7 @@ def test_parse_noise():
     assert bench.parse_stress(STRESS) == 4028.04
     assert bench.parse_builds("builds 14 in 42 s\n") == 20.0
     assert bench.parse_builds("") is None
+    assert bench.parse_count("dumps 30 in 52 s\ndumps 22 in 52 s\n") == 60.0  # parallel streams add up
 
 
 def test_dry_run_order():
@@ -174,3 +175,80 @@ def test_cli_noise_and_hand_config_options(capsys, tmp_path):
 def test_client_hand_config_protects_the_load_generator():
     hand = json.loads(bench.hand_config(ROOT / "bench" / "configs" / "s1-web-hand-client.json", bench.DEFAULT_TEMPLATE))
     assert {"PcommPrefix": "wrk"} in [m[0] for m in hand[0]["matches"]]
+
+
+PGBENCH = """\
+pgbench (16.4 (Ubuntu 16.4-1))
+transaction type: <builtin: TPC-B (sort of)>
+scaling factor: 50
+query mode: prepared
+number of clients: 16
+number of threads: 2
+duration: 30 s
+number of transactions actually processed: 59987
+number of failed transactions: 2 (0.003%)
+latency average = 1.204 ms
+rate limit schedule lag: avg 0.101 (max 9.870) ms
+initial connection time = 12.345 ms
+tps = 1999.612345 (without initial connection time)
+"""
+
+
+def pgbench_log(latencies_us, lag_us=0):
+    """One thread's --log file: client txn time_us script epoch epoch_us schedule_lag_us."""
+    return "".join(f"{i % 16} {i} {t} 0 1730000000 {i} {lag_us}\n" for i, t in enumerate(latencies_us))
+
+
+def test_parse_pgbench():
+    logs = [pgbench_log([1000] * 980 + [5000] * 19 + [20000]), pgbench_log([900] * 1000, lag_us=100)]
+    logs[1] += "3 1001 failed 0 1730000001 5\n"  # failed transactions have no time; counted from the summary
+    r = bench.parse_pgbench(PGBENCH, logs)
+    assert r["p50"] == 1.0  # 0.9 ms + 0.1 ms lag: the lag counts, or p50 would be 0.9
+    assert r["p99"] == 1.0 and r["p999"] == 5.0 and r["p9999"] == 20.0  # 1980 of 2000 at 1 ms, 19 at 5, 1 at 20
+    assert r["rps"] == 1999.612345 and r["errors"] == 2
+    with pytest.raises(bench.BenchError, match="--log"):
+        bench.parse_pgbench(PGBENCH, [])
+
+
+def test_s2_dry_run_order():
+    lab = bench.DryLab(echo=False)
+    b = bench.Bench(lab, bench.S2(rate=2000, ncpu=8), Path("/r"), "/opt/iawp", runs=1, cooldown=0,
+                    log=lambda m: lab.actions.append(f"# {m}"))
+    b.run_all()
+    iawp = lab.actions[lab.actions.index("# arm=iawp run=1/1"):]
+    dump = next(i for i, a in enumerate(iawp) if "pg_dump --no-sync -Fc" in a)
+    copy = next(i for i, a in enumerate(iawp) if "\\copy bulk_$i from" in a and "seq 4" in a)  # 4 streams on 8 CPUs
+    apply = next(i for i, a in enumerate(iawp) if " apply --trust-critical" in a)
+    load = next(i for i, a in enumerate(iawp) if " pgbench " in a)
+    assert max(dump, copy) < apply < load
+    assert "-R2000" in iawp[load] and "--log-prefix=/r/iawp-1.pgbench" in iawp[load] and "PGUSER=bench" in iawp[load]
+    alone = lab.actions[lab.actions.index("# arm=alone run=1/1"):lab.actions.index("# arm=noise run=1/1")]
+    assert not any("pg_dump" in a or "psql" in a for a in alone)
+
+
+def test_s2_summary_from_raw_files(tmp_path):
+    (tmp_path / "meta.json").write_text(json.dumps({"scenario": "s2"}))
+    for arm, slow in (("noise", 30000), ("hand", 4000)):
+        (tmp_path / f"{arm}-1.load.txt").write_text(PGBENCH)
+        (tmp_path / f"{arm}-1.pgbench.4242").write_text(pgbench_log([1000] * 990 + [slow] * 10))
+        (tmp_path / f"{arm}-1.pgbench.4242.1").write_text(pgbench_log([1100] * 1000))
+        (tmp_path / f"{arm}-1.backup.txt").write_text("dumps 6 in 52 s\n")
+        (tmp_path / f"{arm}-1.copy.txt").write_text("copies 13 in 52 s\n")
+    table = bench.write_summary(tmp_path)
+    summary = json.loads((tmp_path / "summary.json").read_text())
+    assert summary["noise"]["p999"]["median"] == 30.0 and summary["hand"]["p999"]["median"] == 4.0
+    assert summary["hand"]["dumps_min"]["median"] == pytest.approx(6.92, abs=0.01)
+    assert "copies/min" in table and "pgbench's per-transaction log" in table and "stress ops/s" not in table
+
+
+def test_s2_cli_and_hand_config(capsys, tmp_path):
+    code = bench.main(["s2", "--rate", "2000", "--runs", "1", "--arms", "noise,hand", "--noise", "backup",
+                       "--iawp", "/opt/iawp", "--out", str(tmp_path / "out"), "--dry-run"])
+    out = capsys.readouterr().out
+    assert code == 0 and "pg_dump" in out and "\\copy" not in out and "pgbench" in out
+    with pytest.raises(SystemExit):
+        bench.main(["s2", "--rate", "1", "--noise", "stress", "--dry-run"])  # an S1 source
+    assert "unknown noise sources: stress" in capsys.readouterr().err
+    hand = json.loads(bench.hand_config(bench.S2.hand_config, bench.DEFAULT_TEMPLATE))
+    assert hand[0]["matches"] == [[{"PcommPrefix": "postgres"}]]
+    assert all(len(m[0]["PcommPrefix"]) <= 15 for layer in hand for m in layer["matches"] if m)  # scx_layered's limit

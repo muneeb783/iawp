@@ -1,0 +1,24 @@
+[
+	{
+		"name": "critical",
+		"comment": "S2 probe: the hand config plus pgbench in critical, standing in for an application on another machine; shows how much of the hand arm's cost is the co-located client waiting",
+		"matches": [
+			[{ "PcommPrefix": "postgres" }],
+			[{ "PcommPrefix": "pgbench" }]
+		],
+		"kind": { "Open": { "preempt": true, "weight": 1000 } }
+	},
+	{
+		"name": "batch",
+		"matches": [
+			[{ "PcommPrefix": "pg_dump" }],
+			[{ "PcommPrefix": "psql" }]
+		],
+		"kind": { "Open": { "weight": 50 } }
+	},
+	{
+		"name": "default",
+		"matches": [[]],
+		"kind": { "Open": {} }
+	}
+]

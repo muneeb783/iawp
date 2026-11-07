@@ -1,0 +1,23 @@
+[
+	{
+		"name": "critical",
+		"comment": "S2 hand-written reference: what a database admin would write. The postgres processes include the backends doing the bulk load's COPY and the backup's reads; nothing in scx_layered's matches can tell them apart from the ones serving pgbench.",
+		"matches": [
+			[{ "PcommPrefix": "postgres" }]
+		],
+		"kind": { "Open": { "preempt": true, "weight": 1000 } }
+	},
+	{
+		"name": "batch",
+		"matches": [
+			[{ "PcommPrefix": "pg_dump" }],
+			[{ "PcommPrefix": "psql" }]
+		],
+		"kind": { "Open": { "weight": 50 } }
+	},
+	{
+		"name": "default",
+		"matches": [[]],
+		"kind": { "Open": {} }
+	}
+]

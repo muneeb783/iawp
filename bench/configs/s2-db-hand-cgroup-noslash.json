@@ -1,0 +1,23 @@
+[
+	{
+		"name": "critical",
+		"comment": "S2 probe: postgres matched by cgroup without a trailing slash; tests whether scx_layered matches a task directly in that cgroup",
+		"matches": [
+			[{ "CgroupPrefix": "system.slice/system-postgresql.slice/postgresql@18-main.service" }]
+		],
+		"kind": { "Open": { "preempt": true, "weight": 1000 } }
+	},
+	{
+		"name": "batch",
+		"matches": [
+			[{ "PcommPrefix": "pg_dump" }],
+			[{ "PcommPrefix": "psql" }]
+		],
+		"kind": { "Open": { "weight": 50 } }
+	},
+	{
+		"name": "default",
+		"matches": [[]],
+		"kind": { "Open": {} }
+	}
+]

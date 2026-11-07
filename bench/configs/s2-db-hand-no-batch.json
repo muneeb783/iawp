@@ -1,0 +1,22 @@
+[
+	{
+		"name": "critical",
+		"comment": "S2 probe: the hand config with pg_dump and psql left in default, as iawp left them; tests whether CPU-heavy work sharing default with pgbench causes the iawp arm's collapse",
+		"matches": [
+			[{ "PcommPrefix": "postgres" }]
+		],
+		"kind": { "Open": { "preempt": true, "weight": 1000 } }
+	},
+	{
+		"name": "batch",
+		"matches": [
+			[{ "PcommPrefix": "iawpnone" }]
+		],
+		"kind": { "Open": { "weight": 50 } }
+	},
+	{
+		"name": "default",
+		"matches": [[]],
+		"kind": { "Open": {} }
+	}
+]
